@@ -130,6 +130,7 @@ std::vector<ImgPathWithBBox> train_data;
 dlib::rand rnd;
 bool init = true;
 int toggle = 0;
+std::string solver = "sgd";
 void thread_load_images(void* param) {
 #pragma omp parallel for
 	for (int i = 0; i < mini_batch_size; i++) {
@@ -145,26 +146,53 @@ void thread_load_images(void* param) {
 }
 void thread_run_trainer(void* param) {
 	if (init == false) {
-		dlib::dnn_trainer<net_type>* trainer_ptr = reinterpret_cast<dlib::dnn_trainer<net_type>*>(param);
-		trainer_ptr->train_one_step(impl_mini_batch_samples[!toggle], impl_mini_batch_labels[!toggle]);
-		std::cerr << "iteration : " << trainer_ptr->get_train_one_step_calls() << ", \tloss : " << trainer_ptr->get_average_loss() << ", \tlr : " << trainer_ptr->get_learning_rate() << std::endl;
+		if (solver == "sgd") {
+			dlib::dnn_trainer<net_type,dlib::sgd>* trainer_ptr = reinterpret_cast<dlib::dnn_trainer<net_type, dlib::sgd>*>(param);
+			trainer_ptr->train_one_step(impl_mini_batch_samples[!toggle], impl_mini_batch_labels[!toggle]);
+			std::cerr << "iteration : " << trainer_ptr->get_train_one_step_calls() << ", \tloss : " << trainer_ptr->get_average_loss() << ", \tlr : " << trainer_ptr->get_learning_rate() << std::endl;
+		} else if (solver == "adam") {
+			dlib::dnn_trainer<net_type, dlib::adam>* trainer_ptr = reinterpret_cast<dlib::dnn_trainer<net_type, dlib::adam>*>(param);
+			trainer_ptr->train_one_step(impl_mini_batch_samples[!toggle], impl_mini_batch_labels[!toggle]);
+			std::cerr << "iteration : " << trainer_ptr->get_train_one_step_calls() << ", \tloss : " << trainer_ptr->get_average_loss() << ", \tlr : " << trainer_ptr->get_learning_rate() << std::endl;
+		}
 	}
 	dlib::auto_mutex locker(count_mutex);
 	count_signaler.signal();
 }
 int main(int argc,const char* argv[]) try{
 	
-	if (argc < 5) {
-		std::cerr << "Arguments : [directory] [xml] [network name] [mini batch size] [lr=0.0001]" << std::endl;
+	if (argc < 9) {
+		std::cerr << "Arguments : [directory] [xml] [network name] [mini batch size] [min detection width=40] [min detection height=40] [solver=sgd] [cropper=350] [lr=0.0001]" << std::endl;
 		return 1;
 	}
 	const std::string data_directory = argv[1];
 	const std::string xml = argv[2];
 	const std::string name = argv[3];
-    float lr=0.0001;
     mini_batch_size=std::atoi(argv[4]);
-    if(argc>=6){
-        lr=std::atof(argv[5]);
+
+	int min_detection_width = 40;
+	if (argc >= 6) {
+		min_detection_width = std::atoi(argv[5]);
+	}
+	int min_detection_height = 40;
+	if (argc >= 7) {
+		min_detection_height = std::atoi(argv[6]);
+	}
+	int min_obj_sz = std::min(min_detection_width, min_detection_height);
+	if (argc >= 8) {
+		std::string solver = argv[7];
+		if (solver != "sgd" || solver != "adam") {
+			std::cerr << "@warning!! Support sgd and adam solver only" << std::endl;
+			solver = "sgd";
+		}
+	}
+	int cropper_size = 350;
+	if (argc >= 9) {
+		cropper_size = std::atoi(argv[8]);
+	}
+	float lr = 0.0001;
+    if(argc>=10){
+        lr=std::atof(argv[9]);
     }
 	
 	train_data = ParseImageListFromXML(data_directory + "/" + xml);
@@ -177,7 +205,7 @@ int main(int argc,const char* argv[]) try{
 	//load_image_dataset(images_test, boxes_test, data_directory + "/testing.xml");
 
 
-	dlib::mmod_options options(boxes_train, 70, 30);
+	dlib::mmod_options options(boxes_train, min_detection_height, min_detection_width);
 
 
 
@@ -187,52 +215,83 @@ int main(int argc,const char* argv[]) try{
 
 
 	net.subnet().layer_details().set_num_filters(options.detector_windows.size());
-
-	dlib::dnn_trainer<net_type> trainer(net, dlib::sgd(0.0001, 0.9));
-	trainer.set_learning_rate(0.1);
-	trainer.be_verbose();
-
-	trainer.set_iterations_without_progress_threshold(10000);
-	trainer.set_test_iterations_without_progress_threshold(1000);
-
-	const std::string sync_filename = name+"_sync";
-	trainer.set_synchronization_file(sync_filename, std::chrono::minutes(5));
-
-
-	
+	const std::string sync_filename = name + "_sync";
 	cropper.set_seed(time(0));
-	cropper.set_chip_dims(350, 350);
+	cropper.set_chip_dims(cropper_size, cropper_size);
 	// Usually you want to give the cropper whatever min sizes you passed to the
 	// mmod_options constructor, or very slightly smaller sizes, which is what we do here.
-	cropper.set_min_object_size(32, 32);
+	cropper.set_min_object_size(min_obj_sz, min_obj_sz);
 	cropper.set_max_rotation_degrees(2);
-	
 
-	// Log the training parameters to the console
-	std::cout << trainer << cropper << std::endl;
+	if (solver == "sgd") {
+		dlib::dnn_trainer<net_type,dlib::sgd> trainer(net, dlib::sgd());
+		trainer.set_learning_rate(0.1);
+		trainer.be_verbose();
+		trainer.set_iterations_without_progress_threshold(10000);
+		trainer.set_test_iterations_without_progress_threshold(1000);
+		trainer.set_synchronization_file(sync_filename, std::chrono::minutes(5));
 
-	int iter = 1;
-	// Run the trainer until the learning rate gets small.
-	std::cout.setstate(std::ios_base::failbit);
-	images_train.assign(mini_batch_size, dlib::matrix<dlib::rgb_pixel>());
-	boxes_train.assign(mini_batch_size, std::vector<dlib::mmod_rect>());
-	while (trainer.get_learning_rate() >= lr) {
-		toggle = !toggle;
-		mini_batch_samples = &impl_mini_batch_samples[toggle];
-		mini_batch_labels = &impl_mini_batch_labels[toggle];
+		// Log the training parameters to the console
+		std::cout << trainer << cropper << std::endl;
 
-		dlib::create_new_thread(thread_load_images, 0);
-		dlib::create_new_thread(thread_run_trainer, &trainer);
-		dlib::auto_mutex mtx(count_mutex);
-		count_signaler.wait();
-		count_signaler.wait();
-		
-		init = false;
-		++iter;
+		int iter = 1;
+		// Run the trainer until the learning rate gets small.
+		std::cout.setstate(std::ios_base::failbit);
+		images_train.assign(mini_batch_size, dlib::matrix<dlib::rgb_pixel>());
+		boxes_train.assign(mini_batch_size, std::vector<dlib::mmod_rect>());
+		while (trainer.get_learning_rate() >= lr) {
+			toggle = !toggle;
+			mini_batch_samples = &impl_mini_batch_samples[toggle];
+			mini_batch_labels = &impl_mini_batch_labels[toggle];
+
+			dlib::create_new_thread(thread_load_images, 0);
+			dlib::create_new_thread(thread_run_trainer, &trainer);
+			dlib::auto_mutex mtx(count_mutex);
+			count_signaler.wait();
+			count_signaler.wait();
+
+			init = false;
+			++iter;
+		}
+		// wait for training threads to stop
+		trainer.get_net();
+		std::cout << "done training" << std::endl;
+	} else if (solver == "adam") {
+		dlib::dnn_trainer<net_type,dlib::adam> trainer(net, dlib::adam());
+		trainer.set_learning_rate(0.1);
+		trainer.be_verbose();
+		trainer.set_iterations_without_progress_threshold(10000);
+		trainer.set_test_iterations_without_progress_threshold(1000);
+		trainer.set_synchronization_file(sync_filename, std::chrono::minutes(5));
+
+		// Log the training parameters to the console
+		std::cout << trainer << cropper << std::endl;
+
+		int iter = 1;
+		// Run the trainer until the learning rate gets small.
+		std::cout.setstate(std::ios_base::failbit);
+		images_train.assign(mini_batch_size, dlib::matrix<dlib::rgb_pixel>());
+		boxes_train.assign(mini_batch_size, std::vector<dlib::mmod_rect>());
+		while (trainer.get_learning_rate() >= lr) {
+			toggle = !toggle;
+			mini_batch_samples = &impl_mini_batch_samples[toggle];
+			mini_batch_labels = &impl_mini_batch_labels[toggle];
+
+			dlib::create_new_thread(thread_load_images, 0);
+			dlib::create_new_thread(thread_run_trainer, &trainer);
+			dlib::auto_mutex mtx(count_mutex);
+			count_signaler.wait();
+			count_signaler.wait();
+
+			init = false;
+			++iter;
+		}
+		// wait for training threads to stop
+		trainer.get_net();
+		std::cout << "done training" << std::endl;
 	}
-	// wait for training threads to stop
-	trainer.get_net();
-	std::cout << "done training" << std::endl;
+
+	
 
 	// Save the network to disk
 	net.clean();

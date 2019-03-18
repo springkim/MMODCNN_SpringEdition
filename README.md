@@ -27,8 +27,12 @@ You need only 2 files for train that are **MMODCNNSE_Train.exe** and **cudnn64_7
 
 There is a example training directory `MMODCNN_SpringEdition_Train/`. You can start training using above files.
 
-The **MMODCNN_Train.exe**'s arguments are `[directory]`,`[xml]`,`[network name]`,`[mini batch size]` and `[min learning rate]`.
+The **MMODCNN_Train.exe**'s arguments are `[directory]`,`[xml]`,`[network name]`,`[mini batch size]` , `[min detection width=40]`, `[min detection height=40]`, `[solver=sgd]`, `[Cropper=350]` and `[min learning rate=0.0001]`.
 
+##### Example
+```
+MMODCNNSE_Train.exe . training.xml hello 32 40 40 adam 500
+```
 
 ### 2. Setup for detect
 
