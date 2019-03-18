@@ -16,6 +16,12 @@ LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_62,code=sm_62)    #for jetson 
 LIST(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_75,code=sm_75)    #for turing
 #https://developer.nvidia.com/cuda-gpus
 
+#find_package(OpenMP)
+#if (OPENMP_FOUND)
+#    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+#    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+#    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+#endif()
 
 set(SOURCE_FILES
         src/tinyxml2.cpp
