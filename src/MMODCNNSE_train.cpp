@@ -3,6 +3,7 @@
 //
 #include"MMODCNNSE_train.h"
 #include<dlib/threads.h>
+#include<chrono>
 dlib::mutex count_mutex;
 dlib::signaler count_signaler(count_mutex);
 #ifdef _MSC_VER
@@ -130,6 +131,7 @@ dlib::rand rnd;
 bool init = true;
 int toggle = 0;
 void thread_load_images(void* param) {
+#pragma omp parallel for
 	for (int i = 0; i < mini_batch_size; i++) {
 		int idx = rand() % images_train.size();
 		load_image(images_train[i], train_data[idx].path);
@@ -145,7 +147,6 @@ void thread_run_trainer(void* param) {
 	if (init == false) {
 		dlib::dnn_trainer<net_type>* trainer_ptr = reinterpret_cast<dlib::dnn_trainer<net_type>*>(param);
 		trainer_ptr->train_one_step(impl_mini_batch_samples[!toggle], impl_mini_batch_labels[!toggle]);
-
 		std::cerr << "iteration : " << trainer_ptr->get_train_one_step_calls() << ", \tloss : " << trainer_ptr->get_average_loss() << ", \tlr : " << trainer_ptr->get_learning_rate() << std::endl;
 	}
 	dlib::auto_mutex locker(count_mutex);
@@ -223,7 +224,6 @@ int main(int argc,const char* argv[]) try{
 		dlib::create_new_thread(thread_load_images, 0);
 		dlib::create_new_thread(thread_run_trainer, &trainer);
 		dlib::auto_mutex mtx(count_mutex);
-		
 		count_signaler.wait();
 		count_signaler.wait();
 		
