@@ -86,7 +86,7 @@ public:
 		std::string dll = "libMMODCNNSE.dll";
 		m_hmod = LoadLibraryA(dll.c_str());
 		if (m_hmod == nullptr) {
-			::MessageBoxA(NULL, (dll + " not found. or can't load dependency dlls(cudnn)").c_str(), "Fatal", MB_OK);
+			::MessageBoxA(NULL, (dll + " not found. or can't load dependency dlls(cudnn64_7.dll or opencv_world400.dll)").c_str(), "Fatal", MB_OK);
 			exit(1);
 		}
 		MMODCNNLoad = (MMODCNNLoadType)GetProcAddress(m_hmod, "MMODCNNLoad");
